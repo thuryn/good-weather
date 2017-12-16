@@ -50,6 +50,7 @@ import java.util.Locale;
 import org.asdtm.goodweather.service.LocationUpdateService;
 
 import static org.asdtm.goodweather.utils.AppPreference.getLastUpdateTimeMillis;
+import static org.asdtm.goodweather.utils.LogToFile.appendLog;
 
 public class MainActivity extends BaseActivity implements AppBarLayout.OnOffsetChangedListener {
 
@@ -279,7 +280,9 @@ public class MainActivity extends BaseActivity implements AppBarLayout.OnOffsetC
             SharedPreferences.Editor editor = mSharedPreferences.edit();
             editor.putString(Constants.APP_SETTINGS_LATITUDE, latitude);
             editor.putString(Constants.APP_SETTINGS_LONGITUDE, longitude);
+            editor.putLong(Constants.LAST_LOCATION_UPDATE_TIME_IN_MS, location.getTime());
             editor.apply();
+            appendLog(getBaseContext(), TAG, "put new location from main activity, latitude=" + latitude + ", longitude=" + longitude);
             boolean resolveAddressByOS = !"location_geocoder_unifiednlp".equals(AppPreference.getLocationGeocoderSource(storedContext));
             Utils.getAndWriteAddressFromGeocoder(geocoder, address, latitude, longitude, resolveAddressByOS, getBaseContext());
             editor.apply();

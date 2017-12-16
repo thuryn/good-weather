@@ -1,25 +1,15 @@
 package org.asdtm.goodweather.widget;
 
-import android.app.PendingIntent;
-import android.appwidget.AppWidgetManager;
-import android.appwidget.AppWidgetProvider;
-import android.content.BroadcastReceiver;
-import android.content.ComponentName;
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.widget.RemoteViews;
 
-import org.asdtm.goodweather.MainActivity;
 import org.asdtm.goodweather.R;
 import org.asdtm.goodweather.utils.AppPreference;
-import org.asdtm.goodweather.utils.AppWidgetProviderAlarm;
 import org.asdtm.goodweather.utils.Constants;
 import org.asdtm.goodweather.utils.Utils;
 
 import java.util.Locale;
-import org.asdtm.goodweather.service.LocationUpdateService;
 
 
 public class LessWidgetProvider extends AbstractWidgetProvider {

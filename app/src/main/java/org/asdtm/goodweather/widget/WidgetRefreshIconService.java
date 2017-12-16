@@ -28,6 +28,7 @@ public class WidgetRefreshIconService extends IntentService {
 
     private static long ROTATE_UPDATE_ICON_MILIS = 100;
 
+    private volatile static Lock rotationLock = new ReentrantLock();
     private final int[] refreshIcons = new int[8];
     private volatile int currentRotationIndex;
     public volatile static boolean isRotationActive = false;
@@ -75,22 +76,47 @@ public class WidgetRefreshIconService extends IntentService {
     }
 
     private void startRotatingUpdateIcon() {
-        if (isRotationActive || timerRotateIconHandler.hasMessages(0)) {
-            return;
+        appendLog(getBaseContext(), TAG, "startRotatingUpdateIcon");
+        rotationLock.lock();
+        try {
+            if (isRotationActive || isThereRotationSchedule()) {
+                return;
+            }
+            isRotationActive = true;
+            currentRotationIndex = 0;
+            rotateRefreshButtonOneStep();
+            timerRotateIconHandler.postDelayed(timerRotateIconRunnable, ROTATE_UPDATE_ICON_MILIS);
+        } finally {
+            rotationLock.unlock();
         }
-        isRotationActive = true;
-        currentRotationIndex = 0;
-        rotateRefreshButtonOneStep();
-        timerRotateIconHandler.postDelayed(timerRotateIconRunnable, ROTATE_UPDATE_ICON_MILIS);
     }
 
     private void stopRotatingUpdateIcon() {
-        isRotationActive = false;
-        timerRotateIconHandler.removeCallbacksAndMessages(null);
+        appendLog(getBaseContext(), TAG, "stopRotatingUpdateIcon");
+        rotationLock.lock();
+        try {
+            isRotationActive = false;
+            timerRotateIconHandler.removeCallbacksAndMessages(null);
+        } finally {
+            rotationLock.unlock();
+        }
     }
 
-    public boolean isRotationActive() {
+    public static boolean isRotationActive() {
         return isRotationActive;
+    }
+
+    public static boolean isThereRotationSchedule() {
+        rotationLock.lock();
+        try {
+            return timerRotateIconHandler.hasMessages(0);
+        } finally {
+            rotationLock.unlock();
+        }
+    }
+
+    private boolean isScreenOn() {
+        return powerManager.isScreenOn();
     }
 
     private void rotateRefreshButtonOneStep() {
@@ -110,29 +136,37 @@ public class WidgetRefreshIconService extends IntentService {
         }
     }
 
-    Handler timerRotateIconHandler = new Handler();
+    private static Handler timerRotateIconHandler = new Handler();
     Runnable timerRotateIconRunnable = new Runnable() {
 
         @Override
         public void run() {
-            if (!powerManager.isScreenOn() || !isRotationActive() || timerRotateIconHandler.hasMessages(0)) {
-                return;
+            rotationLock.lock();
+            try {
+                if (!isScreenOn() || !isRotationActive() || isThereRotationSchedule()) {
+                    return;
+                }
+                rotateRefreshButtonOneStep();
+                timerRotateIconHandler.postDelayed(timerRotateIconRunnable, ROTATE_UPDATE_ICON_MILIS);
+            } finally {
+                rotationLock.unlock();
             }
-            rotateRefreshButtonOneStep();
-            timerRotateIconHandler.postDelayed(timerRotateIconRunnable, ROTATE_UPDATE_ICON_MILIS);
         }
-
-
     };
 
     private BroadcastReceiver screenOnReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            if (!isRotationActive() || timerRotateIconHandler.hasMessages(0)) {
-                return;
+            rotationLock.lock();
+            try {
+                if (!isRotationActive() || isThereRotationSchedule()) {
+                    return;
+                }
+                rotateRefreshButtonOneStep();
+                timerRotateIconHandler.postDelayed(timerRotateIconRunnable, ROTATE_UPDATE_ICON_MILIS);
+            } finally {
+                rotationLock.unlock();
             }
-            rotateRefreshButtonOneStep();
-            timerRotateIconHandler.postDelayed(timerRotateIconRunnable, ROTATE_UPDATE_ICON_MILIS);
         }
     };
 }

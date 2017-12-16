@@ -128,6 +128,8 @@ public class CurrentWeatherService extends Service {
                     String locale = LanguageUtil.getLanguageName(PreferenceUtil.getLanguage(context));
                     String units = AppPreference.getTemperatureUnit(context);
 
+                    appendLog(context, TAG, "weather get params: latitude:" + latitude + ", longitude" + longitude);
+
                     String weatherRaw = new WeatherRequest().getItems(latitude, longitude, units,
                                                                       locale);
                     appendLog(context, TAG, "weather got, result:" + weatherRaw);

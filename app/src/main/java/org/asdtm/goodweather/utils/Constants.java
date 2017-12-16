@@ -14,6 +14,7 @@ public class Constants {
      */
     public static final String APP_SETTINGS_LATITUDE = "latitude";
     public static final String APP_SETTINGS_LONGITUDE = "longitude";
+    public static final String APP_SETTINGS_LOCATION_ACCURACY = "location_accuracy";
     public static final String APP_SETTINGS_ADDRESS_FOUND = "address_found";
     public static final String APP_SETTINGS_CITY = "city";
     public static final String APP_SETTINGS_COUNTRY_CODE = "country_code";
@@ -23,6 +24,7 @@ public class Constants {
     public static final String APP_SETTINGS_GEO_CITY = "geo_city_name";
     public static final String APP_SETTINGS_UPDATE_SOURCE = "update_source";
     public static final String LAST_UPDATE_TIME_IN_MS = "last_update";
+    public static final String LAST_LOCATION_UPDATE_TIME_IN_MS = "last_location_update";
     
     public static final String KEY_PREF_IS_NOTIFICATION_ENABLED = "notification_pref_key";
     public static final String KEY_PREF_TEMPERATURE = "temperature_pref_key";
@@ -40,6 +42,7 @@ public class Constants {
     public static final String KEY_DEBUG_FILE = "debug.log.file";
     public static final String KEY_DEBUG_TO_FILE = "debug.to.file";
     public static final String KEY_DEBUG_FILE_LASTING_HOURS = "debug.file.lasting.hours";
+    public static final String KEY_WAKE_UP_STRATEGY = "wake.up.strategy";
 
     /**
      * About preference screen constants

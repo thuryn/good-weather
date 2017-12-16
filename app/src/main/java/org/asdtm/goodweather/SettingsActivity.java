@@ -260,6 +260,7 @@ public class SettingsActivity extends AppCompatPreferenceActivity {
             } else if (updateListPref.getValue() == null) {
                 updateListPref.setValueIndex(accIndex);
             }
+            initWakeUpStrategy();
         }
 
         @Override
@@ -357,6 +358,40 @@ public class SettingsActivity extends AppCompatPreferenceActivity {
             public void onAccuracyChanged(Sensor sensor, int i) {
             }
         };
+
+        private void initWakeUpStrategy() {
+            Preference wakeUpStrategy = findPreference(Constants.KEY_WAKE_UP_STRATEGY);
+            wakeUpStrategy.setSummary(
+                    getWakeUpStrategyLabel(
+                            PreferenceManager.getDefaultSharedPreferences(getActivity()).getString(Constants.KEY_WAKE_UP_STRATEGY, "nowakeup")
+                    )
+            );
+            wakeUpStrategy.setOnPreferenceChangeListener(new Preference.OnPreferenceChangeListener() {
+                @Override
+                public boolean onPreferenceChange(Preference wakeUpStrategy, Object value) {
+                    String wakeUpStrategyValue = (String) value;
+                    wakeUpStrategy.setSummary(getString(getWakeUpStrategyLabel(wakeUpStrategyValue)));
+                    return true;
+                }
+            });
+        }
+
+        private int getWakeUpStrategyLabel(String wakeUpStrategyValue) {
+            int wakeUpStrategyId;
+            switch (wakeUpStrategyValue) {
+                case "wakeuppartial":
+                    wakeUpStrategyId = R.string.wakeuppartial_label;
+                    break;
+                case "wakeupfull":
+                    wakeUpStrategyId = R.string.wakeupfull_label;
+                    break;
+                case "nowakeup":
+                default:
+                    wakeUpStrategyId = R.string.nowakeup_label;
+                    break;
+            }
+            return wakeUpStrategyId;
+        }
     }
 
     public static class DebugOptionsPreferenceFragment extends PreferenceFragment {

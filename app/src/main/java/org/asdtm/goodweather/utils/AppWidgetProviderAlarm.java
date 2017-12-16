@@ -15,6 +15,8 @@ public class AppWidgetProviderAlarm {
 
     private static final String TAG = "AppWidgetProviderAlarm";
 
+    private static final long START_SENSORS_CHECK_PERIOD = 3600000; //1 hour
+
     private Context mContext;
     private Class<?> mCls;
 
@@ -27,11 +29,15 @@ public class AppWidgetProviderAlarm {
         String updatePeriodStr = AppPreference.getWidgetUpdatePeriod(mContext);
         long updatePeriodMills = Utils.intervalMillisForAlarm(updatePeriodStr);
         appendLog(mContext, TAG, "setAlarm:" + updatePeriodStr);
+        AlarmManager alarmManager = (AlarmManager) mContext.getSystemService(Context.ALARM_SERVICE);
         if ("0".equals(updatePeriodStr)) {
             sendSensorStartIntent(mCls);
+            alarmManager.setRepeating(AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    SystemClock.elapsedRealtime() + START_SENSORS_CHECK_PERIOD,
+                    START_SENSORS_CHECK_PERIOD,
+                    getPendingSensorStartIntent(mCls));
         } else {
             sendSensorStopIntent(mCls);
-            AlarmManager alarmManager = (AlarmManager) mContext.getSystemService(Context.ALARM_SERVICE);
             alarmManager.setRepeating(AlarmManager.ELAPSED_REALTIME_WAKEUP,
                     SystemClock.elapsedRealtime() + updatePeriodMills,
                     updatePeriodMills,
@@ -40,6 +46,7 @@ public class AppWidgetProviderAlarm {
     }
 
     public void cancelAlarm() {
+        appendLog(mContext, TAG, "cancelAlarm");
         AlarmManager alarmManager = (AlarmManager) mContext.getSystemService(Context.ALARM_SERVICE);
         alarmManager.cancel(getPendingIntent(mCls));
         getPendingIntent(mCls).cancel();
@@ -47,15 +54,28 @@ public class AppWidgetProviderAlarm {
 
     private void sendSensorStartIntent(Class<?> cls) {
         Intent sendIntent = new Intent("android.intent.action.START_SENSOR_BASED_UPDATES");
-        fillAndSendSensorEvent(sendIntent, cls);
+        sendIntent = fillAndSendSensorEvent(sendIntent, cls);
+        mContext.startService(sendIntent);
+        appendLog(mContext, TAG, "sendIntent:" + sendIntent);
     }
 
     private void sendSensorStopIntent(Class<?> cls) {
         Intent sendIntent = new Intent("android.intent.action.STOP_SENSOR_BASED_UPDATES");
-        fillAndSendSensorEvent(sendIntent, cls);
+        sendIntent = fillAndSendSensorEvent(sendIntent, cls);
+        mContext.startService(sendIntent);
+        appendLog(mContext, TAG, "sendIntent:" + sendIntent);
     }
 
-    private void fillAndSendSensorEvent(Intent sendIntent, Class<?> cls) {
+    private PendingIntent getPendingSensorStartIntent(Class<?> cls) {
+        Intent sendIntent = new Intent("android.intent.action.START_SENSOR_BASED_UPDATES");
+        sendIntent = fillAndSendSensorEvent(sendIntent, cls);
+        return PendingIntent.getService(mContext,
+                0,
+                sendIntent,
+                PendingIntent.FLAG_CANCEL_CURRENT);
+    }
+
+    private Intent fillAndSendSensorEvent(Intent sendIntent, Class<?> cls) {
         sendIntent.setPackage("org.asdtm.goodweather");
         if (cls.getCanonicalName().equals(LessWidgetProvider.class.getCanonicalName())) {
             sendIntent.putExtra("updateSource", "LESS_WIDGET");
@@ -64,8 +84,7 @@ public class AppWidgetProviderAlarm {
         } else {
             sendIntent.putExtra("updateSource", "EXT_LOC_WIDGET");
         }
-        mContext.startService(sendIntent);
-        appendLog(mContext, TAG, "sendIntent:" + sendIntent);
+        return sendIntent;
     }
 
     private PendingIntent getPendingIntent(Class<?> cls) {

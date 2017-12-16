@@ -383,6 +383,7 @@ public class Utils {
         editor.putString(Constants.APP_SETTINGS_GEO_DISTRICT_OF_CITY, "");
         long now = System.currentTimeMillis();
         editor.putLong(Constants.LAST_UPDATE_TIME_IN_MS, now);
+        //editor.putLong(Constants.LAST_LOCATION_UPDATE_TIME_IN_MS, now); don't set this time because of other resource
         editor.apply();
     }
 

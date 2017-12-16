@@ -17,6 +17,7 @@ import android.location.Geocoder;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.CountDownTimer;
 import android.os.Handler;
@@ -46,9 +47,10 @@ public class LocationUpdateService extends Service implements LocationListener {
 
     private static final String TAG = "LocationUpdateService";
 
+    private static final long WAKEUP_TIMEOUT_IN_MS = 30000L;
     private static final long LOCATION_TIMEOUT_IN_MS = 30000L;
-    private static final long GPS_LOCATION_TIMEOUT_IN_MS = 180000L;
-    private static final float LENGTH_UPDATE_LOCATION_LIMIT = 10000;
+    private static final long GPS_LOCATION_TIMEOUT_IN_MS = 30000L;
+    private static final float LENGTH_UPDATE_LOCATION_LIMIT = 5000;
     private static final float LENGTH_UPDATE_LOCATION_LIMIT_NO_LOCATION = 800;
     private static final long UPDATE_WEATHER_ONLY_TIMEOUT = 900000; //15 min
     private static final long ACCELEROMETER_UPDATE_TIME_SPAN = 900000000000l; //15 min
@@ -59,6 +61,7 @@ public class LocationUpdateService extends Service implements LocationListener {
     private SensorManager senSensorManager;
     private Sensor senAccelerometer;
 
+    private PowerManager.WakeLock wakeLock;
     private String updateSource;
     private String locationSource;
 
@@ -67,6 +70,7 @@ public class LocationUpdateService extends Service implements LocationListener {
     private long lastUpdatedPossition = 0;
     private long lastUpdate = 0;
     private float currentLength = 0;
+    private float currentLengthLowPassed = 0;
     private volatile boolean noLocationFound;
     private float gravity[] = new float[3];
     private MoveVector lastMovement;
@@ -132,6 +136,15 @@ public class LocationUpdateService extends Service implements LocationListener {
         }
     };
 
+    Handler timerWakeUpHandler = new Handler();
+    Runnable timerWakeUpRunnable = new Runnable() {
+
+        @Override
+        public void run() {
+            wakeDown();
+        }
+    };
+
     @Override
     public IBinder onBind(Intent intent) {
         return null;
@@ -143,6 +156,7 @@ public class LocationUpdateService extends Service implements LocationListener {
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
         currentLength = 0;
+        currentLengthLowPassed = 0;
         lastUpdate = 0;
         lastUpdatedPossition = 0;
         gravity[0] = 0;
@@ -206,10 +220,11 @@ public class LocationUpdateService extends Service implements LocationListener {
                 updateSource = currentUpdateSource;
             }
             locationSource = "-";
+            wakeUp();
             if (AppPreference.isUpdateLocationEnabled(this)) {
                 if ("location_geocoder_unifiednlp".equals(AppPreference.getLocationGeocoderSource(this))) {
                     appendLog(getBaseContext(), TAG, "Widget calls to update location");
-                    updateNetworkLocation();
+                    updateNetworkLocation(false);
                 } else {
                     requestLocation();
                 }
@@ -228,11 +243,24 @@ public class LocationUpdateService extends Service implements LocationListener {
     }
     
     public void onLocationChanged(Location location, Address address) {
-        
+        wakeDown();
         lastLocationUpdateTime = System.currentTimeMillis();
         timerHandler.removeCallbacksAndMessages(null);
         removeUpdates(this);
-        
+
+        float storedLocationAccuracy = PreferenceManager.getDefaultSharedPreferences(getBaseContext()).getFloat(Constants.APP_SETTINGS_LOCATION_ACCURACY, 0);
+        float storedLocationTime = PreferenceManager.getDefaultSharedPreferences(getBaseContext()).getLong(Constants.LAST_LOCATION_UPDATE_TIME_IN_MS, 0);
+
+        Calendar now = Calendar.getInstance();
+        now.add(Calendar.MILLISECOND, -300000);
+
+        if ((storedLocationTime > now.getTimeInMillis()) && (location != null) && (location.getAccuracy() > storedLocationAccuracy)) {
+            appendLog(getBaseContext(), TAG, "stored location is recent and more accurate, stored location accuracy = " +
+                    storedLocationAccuracy + ", location accuracy =" + ((location != null)?location.getAccuracy():"") +
+                    ", stored location time = " + storedLocationTime + ", location time" + ((location != null)?location.getTime():""));
+            return;
+        }
+
         if(location == null) {
             gpsRequestLocation();
             return;
@@ -246,29 +274,40 @@ public class LocationUpdateService extends Service implements LocationListener {
         SharedPreferences.Editor editor = mSharedPreferences.edit();
         editor.putString(Constants.APP_SETTINGS_LATITUDE, latitude);
         editor.putString(Constants.APP_SETTINGS_LONGITUDE, longitude);
-        
-        if ((location.getExtras() != null) && (location.getExtras().containsKey("source"))) {
+        editor.putFloat(Constants.APP_SETTINGS_LOCATION_ACCURACY, location.getAccuracy());
+        editor.putLong(Constants.LAST_LOCATION_UPDATE_TIME_IN_MS, location.getTime());
+
+        String updateDetailLevel = PreferenceManager.getDefaultSharedPreferences(getBaseContext()).getString(
+                Constants.KEY_PREF_UPDATE_DETAIL, "preference_display_update_nothing");
+
+        if (updateDetailLevel.equals("preference_display_update_location_source")) {
             String networkSource = location.getExtras().getString("source");
             StringBuilder networkSourceBuilder = new StringBuilder();
             networkSourceBuilder.append("N");
-            
-            String updateDetailLevel = PreferenceManager.getDefaultSharedPreferences(getBaseContext()).getString(
-                Constants.KEY_PREF_UPDATE_DETAIL, "preference_display_update_nothing");
-            
-            if ((networkSource != null) && (updateDetailLevel.equals("preference_display_update_location_source"))) {
-                if (networkSource.contains("cells")) {
-                    networkSourceBuilder.append("c");
+            boolean additionalSourceSetted = false;
+
+            if ((location.getExtras() != null) && (location.getExtras().containsKey("source"))) {
+                if (networkSource != null) {
+                    if (networkSource.contains("cells")) {
+                        networkSourceBuilder.append("c");
+                        additionalSourceSetted = true;
+                    }
+                    if (networkSource.contains("wifis")) {
+                        networkSourceBuilder.append("w");
+                        additionalSourceSetted = true;
+                    }
                 }
-                if (networkSource.contains("wifis")) {
-                    networkSourceBuilder.append("w");
-                }
-                appendLog(getBaseContext(), TAG, "send update source to " + networkSourceBuilder.toString());
-                locationSource = networkSourceBuilder.toString();
             }
+            if (!additionalSourceSetted) {
+                networkSourceBuilder.append(location.getProvider().substring(0, 1));
+            }
+            appendLog(getBaseContext(), TAG, "send update source to " + networkSourceBuilder.toString());
+            locationSource = networkSourceBuilder.toString();
         } else if ("-".equals(locationSource)) {
             locationSource = "N";
         }
         editor.apply();
+        appendLog(getBaseContext(), TAG, "put new location from location update service, latitude=" + latitude + ", longitude=" + longitude);
         boolean resolveAddressByOS = !"location_geocoder_unifiednlp".equals(AppPreference.getLocationGeocoderSource(this));
         noLocationFound = false;
         Utils.getAndWriteAddressFromGeocoder(new Geocoder(this, Locale.getDefault()),
@@ -287,7 +326,7 @@ public class LocationUpdateService extends Service implements LocationListener {
         @Override
         public void run() {
             appendLog(getBaseContext(), TAG, "send update source to N - update location by network, lastKnownLocation timeouted");
-            updateNetworkLocationByNetwork(null);
+            updateNetworkLocationByNetwork(null, false);
         }
     };
 
@@ -361,26 +400,98 @@ public class LocationUpdateService extends Service implements LocationListener {
         }
     }
 
+    private void wakeDown() {
+        timerWakeUpHandler.removeCallbacksAndMessages(null);
+        if (wakeLock != null) {
+            try {
+                wakeLock.release();
+                appendLog(getBaseContext(), TAG, "wakeLock released");
+            } catch (Throwable th) {
+                // ignoring this exception, probably wakeLock was already released
+            }
+        }
+    }
+
+    private void wakeUp() {
+        appendLog(getBaseContext(), TAG, "powerManager:" + powerManager);
+
+        boolean isInUse;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
+            isInUse = powerManager.isInteractive();
+        } else {
+            isInUse = powerManager.isScreenOn();
+        }
+
+        if (isInUse || ((wakeLock != null) && wakeLock.isHeld())) {
+            return;
+        }
+
+        timerWakeUpHandler.postDelayed(timerWakeUpRunnable, WAKEUP_TIMEOUT_IN_MS);
+
+        String wakeUpStrategy = PreferenceManager.getDefaultSharedPreferences(this).getString(Constants.KEY_WAKE_UP_STRATEGY, "nowakeup");
+
+        appendLog(getBaseContext(), TAG, "wakeLock:wakeUpStrategy:" + wakeUpStrategy);
+
+        if (wakeLock != null) {
+            try {
+                wakeLock.release();
+            } catch (Throwable th) {
+                // ignoring this exception, probably wakeLock was already released
+            }
+        }
+
+        if ("nowakeup".equals(wakeUpStrategy)) {
+            return;
+        }
+
+        int powerLockID;
+
+        if ("wakeupfull".equals(wakeUpStrategy)) {
+            powerLockID = PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP;
+        } else {
+            powerLockID = PowerManager.PARTIAL_WAKE_LOCK;
+        }
+
+        appendLog(getBaseContext(), TAG, "wakeLock:powerLockID:" + powerLockID);
+
+        wakeLock = powerManager.newWakeLock(powerLockID, TAG);
+        appendLog(getBaseContext(), TAG, "wakeLock:" + wakeLock + ":" + wakeLock.isHeld());
+        if (!wakeLock.isHeld()) {
+            wakeLock.acquire();
+        }
+        appendLog(getBaseContext(), TAG, "wakeLock acquired");
+    }
+
     private void setNoLocationFound() {
+        SharedPreferences pref = getSharedPreferences(Constants.APP_SETTINGS_NAME, 0);
+        long lastLocationUpdate = pref.getLong(Constants.LAST_LOCATION_UPDATE_TIME_IN_MS, 0);
+        Calendar now = Calendar.getInstance();
+        now.add(Calendar.MINUTE, -5);
+        if (lastLocationUpdate > now.getTimeInMillis()) {
+            return;
+        }
         noLocationFound = true;
         Utils.setNoLocationFound(this);
         updateWidgets();
     }
 
-    private void updateNetworkLocation() {
+    private boolean updateNetworkLocation(boolean bylastLocationOnly) {
 
         if (!checkLocationProviderPermission()) {
-            return;
+            return false;
         }
+        wakeUp();
         startRefreshRotation();
         try {
             lastKnownLocationTimerHandler.postDelayed(lastKnownLocationTimerRunnable, LOCATION_TIMEOUT_IN_MS);
             Location lastLocation = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
             lastKnownLocationTimerHandler.removeCallbacksAndMessages(null);
-            updateNetworkLocationByNetwork(lastLocation);
+            return updateNetworkLocationByNetwork(lastLocation, bylastLocationOnly);
         } catch (Exception e) {
             appendLog(getBaseContext(), TAG, "Exception during update of network location", e);
         }
+        return false;
     }
 
     private void startRefreshRotation() {
@@ -395,7 +506,7 @@ public class LocationUpdateService extends Service implements LocationListener {
         startService(sendIntent);
     }
 
-    private void updateNetworkLocationByNetwork(Location lastLocation) {
+    private boolean updateNetworkLocationByNetwork(Location lastLocation, boolean bylastLocationOnly) {
         Intent sendIntent = new Intent("android.intent.action.START_LOCATION_UPDATE");
         sendIntent.setPackage("org.microg.nlp");
         sendIntent.putExtra("destinationPackageName", "org.asdtm.goodweather");
@@ -403,15 +514,21 @@ public class LocationUpdateService extends Service implements LocationListener {
         Calendar now = Calendar.getInstance();
         now.add(Calendar.MINUTE, -5);
 
-        if ((lastLocation != null) && lastLocation.getTime() > now.getTimeInMillis()) {
+        SharedPreferences pref = getSharedPreferences(Constants.APP_SETTINGS_NAME, 0);
+        long lastLocationUpdate = pref.getLong(Constants.LAST_LOCATION_UPDATE_TIME_IN_MS, 0);
+
+        if ((lastLocation != null) && lastLocation.getTime() > lastLocationUpdate) {
             sendIntent.putExtra("location", lastLocation);
             locationSource = "G";
+        } else if (bylastLocationOnly) {
+            return false;
         }
 
         sendIntent.putExtra("resolveAddress", true);
         startService(sendIntent);
         appendLog(getBaseContext(), TAG, "send intent START_LOCATION_UPDATE:updatesource is N or G:" + sendIntent);
         timerHandler.postDelayed(timerRunnable, LOCATION_TIMEOUT_IN_MS);
+        return true;
     }
 
     private boolean checkLocationProviderPermission() {
@@ -484,6 +601,10 @@ public class LocationUpdateService extends Service implements LocationListener {
     
     private void requestWeatherCheck() {
         startRefreshRotation();
+        boolean updateLocationInProcess = updateNetworkLocation(true);
+        if (updateLocationInProcess) {
+            return;
+        }
         SharedPreferences mSharedPreferences = getSharedPreferences(Constants.APP_SETTINGS_NAME,
                 Context.MODE_PRIVATE);
         SharedPreferences.Editor editor = mSharedPreferences.edit();
@@ -539,6 +660,7 @@ public class LocationUpdateService extends Service implements LocationListener {
                                 ":counted length = " + String.format("%.8f", countedtLength) + ":countedAcc = " + countedAcc +
                                 ", dT = " + String.format("%.8f", dT));
                     }
+                    currentLengthLowPassed += countedtLength;
                     lastMovement = highPassFilter(sensorEvent);
                     return;
                 }
@@ -561,7 +683,7 @@ public class LocationUpdateService extends Service implements LocationListener {
                 return;
             }
 
-            appendLog(getBaseContext(), TAG, "end currentLength = " + String.format("%.8f", absCurrentLength));
+            appendLog(getBaseContext(), TAG, "end currentLength = " + String.format("%.8f", absCurrentLength) + ", currentLengthLowPassed = " + String.format("%.8f", currentLengthLowPassed));
         } catch (Exception e) {
             appendLog(getBaseContext(), TAG, "Exception when processSensorQueue", e);
             return;
@@ -573,10 +695,11 @@ public class LocationUpdateService extends Service implements LocationListener {
         gravity[2] = 0;
         lastUpdatedPossition = lastUpdate;
         currentLength = 0;
+        currentLengthLowPassed = 0;
 
         lastUpdatedWeather = Calendar.getInstance().getTimeInMillis();
         locationSource = "-";
-        updateNetworkLocation();
+        updateNetworkLocation(false);
     }
 
     private MoveVector highPassFilter(SensorEvent sensorEvent) {
